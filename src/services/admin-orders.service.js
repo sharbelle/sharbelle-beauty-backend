@@ -5,19 +5,31 @@ import { UserModel } from "../models/user.model.js";
 import { toOrderStatusLabel, toPaymentStatusLabel } from "../utils/formatters.js";
 import { resolveDateRange } from "../utils/dateRange.js";
 import { toPaginationMeta, toSkipValue } from "../utils/pagination.js";
+import {
+  notifyOrderPaymentUpdatedByAdmin,
+  notifyOrderStatusUpdatedByAdmin,
+} from "./order-notification.service.js";
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const serializeOrder = (order) => {
-  const plain = order.toJSON ? order.toJSON() : order;
+  const plain = order?.toObject ? order.toObject({ virtuals: true }) : order;
+  const rawUser = plain?.userId;
+  const hasPopulatedUser =
+    rawUser && typeof rawUser === "object" && !Array.isArray(rawUser) && Boolean(rawUser.email);
+  const resolvedUserId = hasPopulatedUser
+    ? rawUser.id || rawUser._id?.toString?.() || null
+    : rawUser?.toString?.() || rawUser || null;
 
   return {
     ...plain,
-    user: plain.userId?.email
+    id: plain.id || plain._id?.toString?.(),
+    userId: resolvedUserId,
+    user: hasPopulatedUser
       ? {
-          id: plain.userId.id || plain.userId._id?.toString?.() || plain.userId.toString?.(),
-          fullName: plain.userId.fullName,
-          email: plain.userId.email,
+          id: resolvedUserId,
+          fullName: rawUser.fullName,
+          email: rawUser.email,
         }
       : null,
     orderStatusLabel: toOrderStatusLabel(plain.orderStatus),
@@ -121,21 +133,24 @@ export const updateOrderStatusByAdmin = async (orderId, payload) => {
   const order = await ensureOrder(orderId);
 
   order.orderStatus = payload.orderStatus;
-  order.statusHistory.push({
+  const statusEvent = {
     status: payload.orderStatus,
     label: payload.label || toOrderStatusLabel(payload.orderStatus),
     description:
       payload.description || `Order status updated to ${toOrderStatusLabel(payload.orderStatus)} by admin.`,
     timestamp: new Date(),
-  });
+  };
+  order.statusHistory.push(statusEvent);
 
   await order.save();
+  await notifyOrderStatusUpdatedByAdmin({ order, statusEvent });
 
   return serializeOrder(order);
 };
 
 export const updatePaymentStatusByAdmin = async (orderId, payload) => {
   const order = await ensureOrder(orderId);
+  const note = payload.note?.trim();
 
   order.paymentStatus = payload.paymentStatus;
 
@@ -143,18 +158,25 @@ export const updatePaymentStatusByAdmin = async (orderId, payload) => {
     order.paymentVerifiedAt = new Date();
   }
 
+  let statusEvent = null;
   if (payload.paymentStatus === "failed") {
     order.orderStatus = "cancelled";
-    order.statusHistory.push({
+    statusEvent = {
       status: "cancelled",
       label: "Cancelled",
       description:
-        payload.note || "Payment failed and order status was marked as cancelled by admin.",
+        note || "Payment failed and order status was marked as cancelled by admin.",
       timestamp: new Date(),
-    });
+    };
+    order.statusHistory.push(statusEvent);
   }
 
   await order.save();
+  await notifyOrderPaymentUpdatedByAdmin({ order, note });
+
+  if (statusEvent) {
+    await notifyOrderStatusUpdatedByAdmin({ order, statusEvent });
+  }
 
   return serializeOrder(order);
 };

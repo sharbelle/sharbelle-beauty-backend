@@ -1,11 +1,50 @@
-const orderDeliveredEmail = ({ fullName, orderNumber }) => {
-  return `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#2b2b2b;max-width:640px;margin:0 auto;padding:24px;">
-      <h2 style="margin-bottom:8px;color:#6b2b5d;">Order Delivered</h2>
-      <p>Hi ${fullName}, your order <strong>${orderNumber}</strong> has been delivered.</p>
-      <p>We hope you love your products. Thank you for choosing Sharbelle Beauty.</p>
+import {
+  escapeHtml,
+  renderEmailLayout,
+  renderOrderMeta,
+  renderTimeline,
+} from "./emailLayout.js";
+
+const orderDeliveredEmail = ({
+  customerName,
+  order,
+  orderUrl,
+  statusEvent,
+}) => {
+  const latestEvent =
+    statusEvent || (order?.statusHistory || []).find((event) => event.status === "delivered");
+  const bodyHtml = `
+    <div style="margin-bottom:14px;">
+      ${renderOrderMeta(order)}
     </div>
+    ${
+      latestEvent
+        ? `
+      <div style="border:1px solid #efe6ec;border-radius:10px;padding:14px;background:#fff;margin-bottom:14px;">
+        <div style="font-size:11px;letter-spacing:.12em;color:#8b6f82;font-weight:700;margin-bottom:8px;">DELIVERY UPDATE</div>
+        <div style="font-size:14px;color:#2a1d28;font-weight:700;margin-bottom:6px;">
+          ${escapeHtml(latestEvent.label || "Delivered")}
+        </div>
+        <div style="font-size:13px;color:#5a4353;line-height:1.55;">
+          ${escapeHtml(latestEvent.description || "Your order has been delivered successfully.")}
+        </div>
+      </div>
+    `
+        : ""
+    }
+    <div style="margin:0 0 12px;font-size:11px;letter-spacing:.12em;color:#8b6f82;font-weight:700;">RECENT TIMELINE</div>
+    ${renderTimeline((order?.statusHistory || []).slice(0, 5))}
   `;
+
+  return renderEmailLayout({
+    preheader: `${order?.orderNumber || "Order"} delivered`,
+    heading: "Order delivered",
+    greeting: `Hi ${customerName || "there"},`,
+    intro: "Your order has been delivered. We hope you love every item.",
+    bodyHtml,
+    ctaLabel: "VIEW ORDER",
+    ctaUrl: orderUrl,
+  });
 };
 
 export default orderDeliveredEmail;

@@ -11,6 +11,10 @@ import {
 import { CouponModel } from "../models/coupon.model.js";
 import { OrderModel } from "../models/order.model.js";
 import { ProductModel } from "../models/product.model.js";
+import {
+  notifyOrderCreated,
+  notifyOrderStatusUpdatedByAdmin,
+} from "./order-notification.service.js";
 import { toOrderStatusLabel, toPaymentStatusLabel } from "../utils/formatters.js";
 
 const PAYSTACK_SUCCESS = "success";
@@ -36,10 +40,15 @@ const makeStatusEvent = (status, label, description, timestamp = new Date()) => 
 });
 
 const addStatusEventIfMissing = (order, status, label, description, timestamp = new Date()) => {
-  const exists = order.statusHistory.some((event) => event.status === status);
-  if (!exists) {
-    order.statusHistory.push(makeStatusEvent(status, label, description, timestamp));
+  const existingEvent = order.statusHistory.find((event) => event.status === status);
+
+  if (existingEvent) {
+    return existingEvent;
   }
+
+  const event = makeStatusEvent(status, label, description, timestamp);
+  order.statusHistory.push(event);
+  return event;
 };
 
 const serializeOrder = (order) => {
@@ -216,7 +225,7 @@ const markOrderPaid = async (order, providerResponse) => {
     order.orderStatus = "confirmed";
   }
 
-  addStatusEventIfMissing(
+  const statusEvent = addStatusEventIfMissing(
     order,
     "confirmed",
     "Payment confirmed",
@@ -227,6 +236,7 @@ const markOrderPaid = async (order, providerResponse) => {
   await order.save();
   await updateInventoryForOrderItems(order.items, "decrement");
   await updateCouponUsage(order.couponCode, 1);
+  await notifyOrderStatusUpdatedByAdmin({ order, statusEvent });
 
   return order;
 };
@@ -243,7 +253,7 @@ const markOrderFailed = async (order, providerResponse) => {
     order.orderStatus = "cancelled";
   }
 
-  addStatusEventIfMissing(
+  const statusEvent = addStatusEventIfMissing(
     order,
     "cancelled",
     "Payment failed",
@@ -251,6 +261,7 @@ const markOrderFailed = async (order, providerResponse) => {
   );
 
   await order.save();
+  await notifyOrderStatusUpdatedByAdmin({ order, statusEvent });
   return order;
 };
 
@@ -263,7 +274,7 @@ const markOrderRefunded = async (order, providerResponse) => {
   order.paymentProviderResponse = providerResponse || null;
   order.orderStatus = "returned";
 
-  addStatusEventIfMissing(
+  const statusEvent = addStatusEventIfMissing(
     order,
     "returned",
     "Refund processed",
@@ -273,6 +284,7 @@ const markOrderRefunded = async (order, providerResponse) => {
   await order.save();
   await updateInventoryForOrderItems(order.items, "increment");
   await updateCouponUsage(order.couponCode, -1);
+  await notifyOrderStatusUpdatedByAdmin({ order, statusEvent });
 
   return order;
 };
@@ -344,6 +356,10 @@ export const initializeCheckoutForUser = async ({ user, payload }) => {
 
   try {
     const paymentSession = await initializeProviderPayment({ user, order });
+    await notifyOrderCreated({
+      order,
+      paymentUrl: paymentSession.authorizationUrl,
+    });
 
     return {
       order: serializeOrder(order),
