@@ -1,9 +1,32 @@
-import { Resend } from "resend";
 import env from "../config/env.js";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+let resendClientPromise = null;
 
-const resendClient = env.resendApiKey ? new Resend(env.resendApiKey) : null;
+const getResendClient = async () => {
+  if (!env.resendApiKey) {
+    return null;
+  }
+
+  if (!resendClientPromise) {
+    resendClientPromise = import("resend")
+      .then((module) => {
+        const ResendClass = module?.Resend;
+        if (!ResendClass) {
+          throw new Error("Resend export not found");
+        }
+        return new ResendClass(env.resendApiKey);
+      })
+      .catch((error) => {
+        console.error("[mail] Resend SDK unavailable", {
+          error: error instanceof Error ? error.message : error,
+        });
+        return null;
+      });
+  }
+
+  return resendClientPromise;
+};
 
 const normalizeRecipients = (input) => {
   const values = Array.isArray(input) ? input : [input];
@@ -27,7 +50,7 @@ const normalizeRecipients = (input) => {
 };
 
 export const isMailConfigured = () => {
-  return Boolean(resendClient && env.mailFrom);
+  return Boolean(env.resendApiKey && env.mailFrom);
 };
 
 export const sendEmail = async ({ to, subject, html }) => {
@@ -43,6 +66,12 @@ export const sendEmail = async ({ to, subject, html }) => {
       recipients,
     });
     return { sent: false, reason: "not_configured" };
+  }
+
+  const resendClient = await getResendClient();
+
+  if (!resendClient) {
+    return { sent: false, reason: "provider_unavailable" };
   }
 
   try {
