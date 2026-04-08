@@ -14,6 +14,9 @@ const env = {
   paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
   paystackCallbackUrl:
     process.env.PAYSTACK_CALLBACK_URL || "http://localhost:8080/checkout/callback",
+  resendApiKey: process.env.RESEND_API_KEY || "",
+  mailFrom: process.env.MAIL_FROM || "",
+  mailReplyTo: process.env.MAIL_REPLY_TO || "",
   cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
   cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "",
