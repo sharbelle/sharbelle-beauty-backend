@@ -17,6 +17,6 @@ const router = Router();
 router.post("/webhook", webhook);
 router.get("/defaults", authMiddleware, checkoutDefaults);
 router.post("/initialize", authMiddleware, validateBody(initializeCheckoutInputSchema), initializeCheckout);
-router.get("/verify/:reference", authMiddleware, validateParams(verifyCheckoutParamSchema), verifyCheckout);
+router.get("/verify/:txRef", authMiddleware, validateParams(verifyCheckoutParamSchema), verifyCheckout);
 
 export default router;

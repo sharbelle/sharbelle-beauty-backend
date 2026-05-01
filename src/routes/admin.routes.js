@@ -18,6 +18,10 @@ import {
   updateAdminOrderStatus,
 } from "../controllers/admin-orders.controller.js";
 import {
+  exportAdminWaitlistCsv,
+  getAdminWaitlist,
+} from "../controllers/waitlist.controller.js";
+import {
   createAdminCategory,
   createAdminTag,
   getAdminCategories,
@@ -53,6 +57,10 @@ import { createCategoryInputSchema } from "../models/category.model.js";
 import { createTagInputSchema } from "../models/tag.model.js";
 import { completeUploadInputSchema, uploadSignatureInputSchema } from "../models/upload.model.js";
 import { updateStoreSettingsInputSchema } from "../models/store-settings.model.js";
+import {
+  waitlistExportQuerySchema,
+  waitlistListQuerySchema,
+} from "../models/waitlist.model.js";
 
 const router = Router();
 
@@ -96,6 +104,8 @@ router.patch(
   validateBody(updatePaymentStatusInputSchema),
   updateAdminOrderPaymentStatus,
 );
+router.get("/waitlist", validateQuery(waitlistListQuerySchema), getAdminWaitlist);
+router.get("/waitlist/export", validateQuery(waitlistExportQuerySchema), exportAdminWaitlistCsv);
 
 router.post("/uploads/signature", validateBody(uploadSignatureInputSchema), getUploadSignature);
 router.post("/uploads/complete", validateBody(completeUploadInputSchema), completeUpload);

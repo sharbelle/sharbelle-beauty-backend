@@ -47,7 +47,6 @@ export const TRACKING_PROGRESS_FLOW = [
   "delivered",
 ];
 
-export const DEFAULT_SHIPPING_FEE = 1500;
 export const DEFAULT_DISCOUNT = 0;
 export const DEFAULT_CURRENCY = "NGN";
-export const DEFAULT_PAYMENT_METHOD = "paystack";
+export const DEFAULT_PAYMENT_METHOD = "flutterwave";

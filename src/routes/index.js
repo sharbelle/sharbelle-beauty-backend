@@ -5,6 +5,7 @@ import checkoutRoutes from "./checkout.routes.js";
 import ordersRoutes from "./orders.routes.js";
 import productsRoutes from "./products.routes.js";
 import settingsRoutes from "./settings.routes.js";
+import waitlistRoutes from "./waitlist.routes.js";
 import wishlistRoutes from "./wishlist.routes.js";
 
 const router = Router();
@@ -15,6 +16,7 @@ router.use("/auth", authRoutes);
 router.use("/checkout", checkoutRoutes);
 router.use("/orders", ordersRoutes);
 router.use("/wishlist", wishlistRoutes);
+router.use("/waitlist", waitlistRoutes);
 router.use("/admin", adminRoutes);
 
 export default router;

@@ -33,6 +33,8 @@ export const addressValidationSchema = z.object({
   line2: z.string().optional(),
   city: z.string().min(1),
   state: z.string().min(1),
+  areaLga: z.string().min(1, "Area or LGA is required"),
+  closestLandmark: z.string().min(2, "Closest landmark is required"),
   postalCode: z.string().min(1),
   country: z.string().min(1),
   phone: z.string().min(7),
@@ -101,6 +103,16 @@ const addressSchema = new mongoose.Schema(
       trim: true,
     },
     state: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    areaLga: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    closestLandmark: {
       type: String,
       required: true,
       trim: true,
@@ -253,7 +265,7 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: {
       type: String,
       required: true,
-      default: "paystack",
+      default: "flutterwave",
       trim: true,
     },
     paymentReference: {

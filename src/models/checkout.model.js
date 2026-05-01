@@ -15,5 +15,5 @@ export const initializeCheckoutInputSchema = z.object({
 });
 
 export const verifyCheckoutParamSchema = z.object({
-  reference: z.string().trim().min(6, "Valid payment reference is required"),
+  txRef: z.string().trim().min(6, "Valid payment transaction reference is required"),
 });

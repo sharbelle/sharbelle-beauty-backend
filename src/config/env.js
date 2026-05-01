@@ -10,10 +10,13 @@ const env = {
   frontendOrigin: process.env.FRONTEND_ORIGIN || "http://localhost:8080",
   mongodbUri:
     process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/sharbelle-beauty",
-  paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
-  paystackBaseUrl: process.env.PAYSTACK_BASE_URL || "https://api.paystack.co",
-  paystackCallbackUrl:
-    process.env.PAYSTACK_CALLBACK_URL || "http://localhost:8080/checkout/callback",
+  flutterwaveSecretKey: process.env.FLUTTERWAVE_SECRET_KEY || "",
+  flutterwaveSecretHash: process.env.FLUTTERWAVE_SECRET_HASH || "",
+  flutterwaveBaseUrl:
+    process.env.FLUTTERWAVE_BASE_URL || "https://api.flutterwave.com/v3",
+  flutterwaveRedirectUrl:
+    process.env.FLUTTERWAVE_REDIRECT_URL || "http://localhost:8080/checkout/callback",
+  flutterwaveDebug: process.env.FLUTTERWAVE_DEBUG === "true",
   resendApiKey: process.env.RESEND_API_KEY || "",
   mailFrom: process.env.MAIL_FROM || "",
   mailReplyTo: process.env.MAIL_REPLY_TO || "",
