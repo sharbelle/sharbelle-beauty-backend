@@ -35,11 +35,16 @@ Point your Flutterwave webhook URL to:
 
 ## Delivery Pricing By Area/LGA
 
-Checkout delivery fee is now dynamic and resolved by the shipping `areaLga`.
+Checkout delivery fee is dynamic and resolved by shipping `areaLga`.
 
-- Configure origin, fallback fee, and area fees in `src/config/delivery-zones.js`
-- The current delivery origin is `Yaba, Lagos`
-- If an `areaLga` is not found in the map, the configured default delivery fee is used
+- Pricing is stored in MongoDB inside `store_settings.deliveryPricing`
+- Update pricing via `PATCH /api/admin/settings` with:
+  - `deliveryPricing.origin`
+  - `deliveryPricing.defaultFee`
+  - `deliveryPricing.areas` (`[{ areaLga, fee }]`)
+- The checkout defaults endpoint (`GET /api/checkout/defaults`) returns the same delivery pricing config used to compute fees
+- If an `areaLga` is not matched, the configured `defaultFee` is used
+- On first run, defaults are auto-seeded from `src/config/delivery-zones.js`
 
 ## Waitlist
 

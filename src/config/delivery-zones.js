@@ -26,32 +26,86 @@ const DELIVERY_FEES_BY_AREA = Object.freeze({
   Ikorodu: 3500,
 });
 
-const normalizeAreaLga = (value = "") => value.trim().toLowerCase().replace(/\s+/g, " ");
+export const normalizeAreaLga = (value = "") => value.trim().toLowerCase().replace(/\s+/g, " ");
 
-const normalizedFeeMap = new Map(
-  Object.entries(DELIVERY_FEES_BY_AREA).map(([areaLga, fee]) => [
-    normalizeAreaLga(areaLga),
+const toSortedAreas = (areas = []) =>
+  [...areas].sort((a, b) => a.areaLga.localeCompare(b.areaLga));
+
+const FALLBACK_AREAS = toSortedAreas(
+  Object.entries(DELIVERY_FEES_BY_AREA).map(([areaLga, fee]) => ({
+    areaLga,
     fee,
-  ]),
+  })),
 );
-
-export const resolveDeliveryFeeByLga = (areaLga) => {
-  const normalized = normalizeAreaLga(areaLga);
-  if (!normalized) {
-    return DEFAULT_DELIVERY_FEE;
-  }
-
-  return normalizedFeeMap.get(normalized) ?? DEFAULT_DELIVERY_FEE;
-};
 
 export const getDeliveryPricingConfig = () => ({
   origin: DELIVERY_PRICING_ORIGIN,
   defaultFee: DEFAULT_DELIVERY_FEE,
-  areas: Object.entries(DELIVERY_FEES_BY_AREA)
-    .map(([areaLga, fee]) => ({
-      areaLga,
-      fee,
-    }))
-    .sort((a, b) => a.areaLga.localeCompare(b.areaLga)),
+  areas: FALLBACK_AREAS.map((entry) => ({
+    areaLga: entry.areaLga,
+    fee: entry.fee,
+  })),
 });
 
+export const normalizeDeliveryPricingConfig = (value) => {
+  const fallback = getDeliveryPricingConfig();
+  const source = value && typeof value === "object" ? value : {};
+
+  const origin =
+    typeof source.origin === "string" && source.origin.trim()
+      ? source.origin.trim()
+      : fallback.origin;
+
+  const defaultFeeCandidate = Number(source.defaultFee);
+  const defaultFee =
+    Number.isFinite(defaultFeeCandidate) && defaultFeeCandidate >= 0
+      ? Math.round(defaultFeeCandidate)
+      : fallback.defaultFee;
+
+  const seen = new Set();
+  const normalizedAreas = [];
+  const sourceAreas = Array.isArray(source.areas) ? source.areas : fallback.areas;
+
+  for (const area of sourceAreas) {
+    if (!area || typeof area !== "object") {
+      continue;
+    }
+
+    const areaLga = typeof area.areaLga === "string" ? area.areaLga.trim() : "";
+    const normalizedKey = normalizeAreaLga(areaLga);
+
+    if (!areaLga || !normalizedKey || seen.has(normalizedKey)) {
+      continue;
+    }
+
+    const feeCandidate = Number(area.fee);
+    const fee =
+      Number.isFinite(feeCandidate) && feeCandidate >= 0
+        ? Math.round(feeCandidate)
+        : defaultFee;
+
+    seen.add(normalizedKey);
+    normalizedAreas.push({
+      areaLga,
+      fee,
+    });
+  }
+
+  return {
+    origin,
+    defaultFee,
+    areas: normalizedAreas.length > 0 ? toSortedAreas(normalizedAreas) : fallback.areas,
+  };
+};
+
+export const resolveDeliveryFeeByLga = (areaLga, deliveryPricing) => {
+  const normalizedArea = normalizeAreaLga(areaLga);
+  const config = normalizeDeliveryPricingConfig(deliveryPricing);
+
+  if (!normalizedArea) {
+    return config.defaultFee;
+  }
+
+  const match = config.areas.find((entry) => normalizeAreaLga(entry.areaLga) === normalizedArea);
+  return match?.fee ?? config.defaultFee;
+};

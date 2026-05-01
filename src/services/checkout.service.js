@@ -19,6 +19,7 @@ import {
   notifyOrderStatusUpdatedByAdmin,
 } from "./order-notification.service.js";
 import { toOrderStatusLabel, toPaymentStatusLabel } from "../utils/formatters.js";
+import { getStoreSettings } from "./store-settings.service.js";
 
 const FLUTTERWAVE_SUCCESS = "successful";
 const FLUTTERWAVE_FAILURE_STATES = new Set(["failed", "cancelled", "abandoned"]);
@@ -138,6 +139,11 @@ const toQueryString = (params) => {
 
   const serialized = query.toString();
   return serialized ? `?${serialized}` : "";
+};
+
+const getDeliveryPricingForCheckout = async () => {
+  const settings = await getStoreSettings();
+  return settings.deliveryPricing || getDeliveryPricingConfig();
 };
 
 const resolveFlutterwaveSecretKey = () => {
@@ -543,7 +549,11 @@ const isValidWebhookSignature = ({ signature, rawBody, payload }) => {
 export const initializeCheckoutForUser = async ({ user, payload }) => {
   const orderItems = await buildOrderItems(payload.items);
   const subtotal = orderItems.reduce((sum, item) => sum + item.total, 0);
-  const shippingFee = resolveDeliveryFeeByLga(payload.shippingAddress.areaLga);
+  const deliveryPricing = await getDeliveryPricingForCheckout();
+  const shippingFee = resolveDeliveryFeeByLga(
+    payload.shippingAddress.areaLga,
+    deliveryPricing,
+  );
   const couponResult = await applyCoupon({
     couponCode: payload.couponCode,
     subtotal,
@@ -710,7 +720,7 @@ const normalizeAddress = (address) => {
 
 export const getCheckoutDefaultsForUser = async (userId) => {
   const latestOrder = await OrderModel.findOne({ userId }).sort({ createdAt: -1 }).lean();
-  const deliveryPricing = getDeliveryPricingConfig();
+  const deliveryPricing = await getDeliveryPricingForCheckout();
 
   if (!latestOrder) {
     return {
