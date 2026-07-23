@@ -65,6 +65,8 @@ export const getStoreSettings = async () => {
 };
 
 export const updateStoreSettings = async (payload) => {
+  await ensureStoreSettings();
+
   const update = {};
 
   if (typeof payload.playlistUrl === "string") {
@@ -77,19 +79,8 @@ export const updateStoreSettings = async (payload) => {
 
   const settings = await StoreSettingsModel.findOneAndUpdate(
     { singletonKey: SETTINGS_SINGLETON_KEY },
-    {
-      $set: update,
-      $setOnInsert: {
-        singletonKey: SETTINGS_SINGLETON_KEY,
-        playlistUrl: DEFAULT_PLAYLIST_URL,
-        deliveryPricing: DEFAULT_DELIVERY_PRICING,
-      },
-    },
-    {
-      upsert: true,
-      new: true,
-      setDefaultsOnInsert: true,
-    },
+    { $set: update },
+    { new: true },
   );
 
   return toSettingsPayload(settings);
