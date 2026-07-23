@@ -24,12 +24,23 @@ import { getStoreSettings } from "./store-settings.service.js";
 const FLUTTERWAVE_SUCCESS = "successful";
 const FLUTTERWAVE_FAILURE_STATES = new Set(["failed", "cancelled", "abandoned"]);
 
+const PAYSTACK_SUCCESS = "success";
+const PAYSTACK_FAILURE_STATES = new Set(["failed", "abandoned", "reversed"]);
+
 const logFlutterwaveDebug = (message, details = {}) => {
   if (!env.flutterwaveDebug) {
     return;
   }
 
   console.info(`[flutterwave-debug] ${message}`, details);
+};
+
+const logPaystackDebug = (message, details = {}) => {
+  if (!env.paystackDebug) {
+    return;
+  }
+
+  console.info(`[paystack-debug] ${message}`, details);
 };
 
 const maskSensitiveValue = (value) => {
@@ -95,8 +106,14 @@ const generateOrderNumber = () => {
   return `SHR-${stamp}${random}`;
 };
 
-const generatePaymentReference = () => {
-  return `FLW-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const PAYMENT_REFERENCE_PREFIXES = {
+  flutterwave: "FLW",
+  paystack: "PSK",
+};
+
+const generatePaymentReference = (provider = DEFAULT_PAYMENT_METHOD) => {
+  const prefix = PAYMENT_REFERENCE_PREFIXES[provider] || "PAY";
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 };
 
 const makeStatusEvent = (status, label, description, timestamp = new Date()) => ({
@@ -213,6 +230,87 @@ const flutterwaveRequest = async (path, { method = "GET", body = undefined, quer
     httpStatus: response.status,
     ok: response.ok,
     providerStatus: payload?.status || null,
+    providerMessage: payload?.message || null,
+    bodySnippet: truncateForLog(payload || rawPayload || ""),
+  });
+
+  if (!response.ok || !isSuccessfulPayload) {
+    throw new ApiError(
+      502,
+      payload?.message || "Payment provider request failed",
+      "PAYMENT_PROVIDER_ERROR",
+    );
+  }
+
+  return payload.data;
+};
+
+const resolvePaystackSecretKey = () => {
+  const rawValue = env.paystackSecretKey || "";
+  const trimmed = rawValue.trim().replace(/^["']|["']$/g, "");
+  const withoutBearer = trimmed.replace(/^Bearer\s+/i, "");
+
+  if (!withoutBearer) {
+    throw new ApiError(
+      500,
+      "Paystack is not configured. Set PAYSTACK_SECRET_KEY.",
+      "PAYSTACK_NOT_CONFIGURED",
+    );
+  }
+
+  // Paystack secret keys start with sk_test_ or sk_live_.
+  if (!/^sk_(test|live)_/i.test(withoutBearer)) {
+    throw new ApiError(
+      500,
+      "Invalid PAYSTACK_SECRET_KEY format. Use your Paystack Secret Key (starts with sk_test_ or sk_live_).",
+      "PAYSTACK_INVALID_SECRET_KEY_FORMAT",
+    );
+  }
+
+  return withoutBearer;
+};
+
+const paystackRequest = async (path, { method = "GET", body = undefined, query = undefined } = {}) => {
+  const authToken = resolvePaystackSecretKey();
+  const queryString = query ? toQueryString(query) : "";
+  const requestUrl = `${env.paystackBaseUrl}${path}${queryString}`;
+
+  logPaystackDebug("outbound-request", {
+    method,
+    url: requestUrl,
+    authToken: maskSensitiveValue(authToken),
+    query: query || null,
+  });
+
+  const response = await fetch(requestUrl, {
+    method,
+    headers: {
+      Authorization: `Bearer ${authToken}`,
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const rawPayload = await response.text();
+  const payload = (() => {
+    if (!rawPayload) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(rawPayload);
+    } catch {
+      return null;
+    }
+  })();
+  const isSuccessfulPayload = payload?.status === true;
+
+  logPaystackDebug("outbound-response", {
+    method,
+    url: requestUrl,
+    httpStatus: response.status,
+    ok: response.ok,
+    providerStatus: payload?.status ?? null,
     providerMessage: payload?.message || null,
     bodySnippet: truncateForLog(payload || rawPayload || ""),
   });
@@ -430,7 +528,7 @@ const markOrderRefunded = async (order, providerResponse) => {
   return order;
 };
 
-const initializeProviderPayment = async ({ user, order }) => {
+const initializeFlutterwavePayment = async ({ user, order }) => {
   const data = await flutterwaveRequest("/payments", {
     method: "POST",
     body: {
@@ -464,6 +562,42 @@ const initializeProviderPayment = async ({ user, order }) => {
   };
 };
 
+const initializePaystackPayment = async ({ user, order }) => {
+  const data = await paystackRequest("/transaction/initialize", {
+    method: "POST",
+    body: {
+      email: user.email,
+      amount: Math.round(order.total * 100),
+      currency: order.currency,
+      reference: order.paymentReference,
+      callback_url: env.paystackCallbackUrl,
+      metadata: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        userId: user.id,
+        customerName: user.fullName || user.email || "Sharbelle Customer",
+        customerPhone: order.shippingAddress?.phone || undefined,
+      },
+    },
+  });
+
+  if (!data?.authorization_url) {
+    throw new ApiError(502, "Could not create Paystack payment session", "PAYMENT_PROVIDER_ERROR");
+  }
+
+  return {
+    checkoutUrl: data.authorization_url,
+  };
+};
+
+const initializeProviderPayment = async ({ user, order }) => {
+  if (order.paymentMethod === "paystack") {
+    return initializePaystackPayment({ user, order });
+  }
+
+  return initializeFlutterwavePayment({ user, order });
+};
+
 const verifyFlutterwaveTransactionById = async (transactionId) => {
   if (!transactionId) {
     throw new ApiError(400, "Missing transaction id for verification", "INVALID_PROVIDER_RESPONSE");
@@ -484,13 +618,31 @@ const verifyFlutterwaveTransactionByReference = async (txRef) => {
   });
 };
 
-const assertSuccessfulTransactionMatchesOrder = (order, transaction) => {
-  const txRef = transaction?.tx_ref || transaction?.txRef;
-  const currency = transaction?.currency;
-  const amount = Number(transaction?.amount || 0);
+const verifyPaystackTransactionByReference = async (reference) => {
+  if (!reference) {
+    throw new ApiError(400, "Missing transaction reference for verification", "INVALID_PROVIDER_RESPONSE");
+  }
+
+  return paystackRequest(`/transaction/verify/${encodeURIComponent(String(reference))}`);
+};
+
+const normalizeFlutterwaveTransaction = (transaction) => ({
+  reference: transaction?.tx_ref || transaction?.txRef,
+  currency: transaction?.currency,
+  amount: Number(transaction?.amount || 0),
+});
+
+const normalizePaystackTransaction = (transaction) => ({
+  reference: transaction?.reference,
+  currency: transaction?.currency,
+  amount: Number(transaction?.amount || 0) / 100,
+});
+
+const assertSuccessfulTransactionMatchesOrder = (order, normalizedTransaction) => {
+  const { reference, currency, amount } = normalizedTransaction;
   const expectedAmount = Number(order.total || 0);
 
-  if (txRef !== order.paymentReference) {
+  if (reference !== order.paymentReference) {
     throw new ApiError(400, "Transaction reference does not match this order", "PAYMENT_REFERENCE_MISMATCH");
   }
 
@@ -503,7 +655,7 @@ const assertSuccessfulTransactionMatchesOrder = (order, transaction) => {
   }
 };
 
-const toPaymentState = (providerStatus) => {
+const toFlutterwavePaymentState = (providerStatus) => {
   if (providerStatus === FLUTTERWAVE_SUCCESS) {
     return "paid";
   }
@@ -515,7 +667,19 @@ const toPaymentState = (providerStatus) => {
   return "pending";
 };
 
-const isValidWebhookSignature = ({ signature, rawBody, payload }) => {
+const toPaystackPaymentState = (providerStatus) => {
+  if (providerStatus === PAYSTACK_SUCCESS) {
+    return "paid";
+  }
+
+  if (PAYSTACK_FAILURE_STATES.has(providerStatus)) {
+    return "failed";
+  }
+
+  return "pending";
+};
+
+const isValidFlutterwaveWebhookSignature = ({ signature, rawBody, payload }) => {
   if (!env.flutterwaveSecretHash) {
     return false;
   }
@@ -546,6 +710,26 @@ const isValidWebhookSignature = ({ signature, rawBody, payload }) => {
   return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signatureValue));
 };
 
+const isValidPaystackWebhookSignature = ({ signature, rawBody }) => {
+  if (!env.paystackSecretKey || !signature) {
+    return false;
+  }
+
+  const bodyBuffer = rawBody || Buffer.from("");
+  const digest = crypto
+    .createHmac("sha512", resolvePaystackSecretKey())
+    .update(bodyBuffer)
+    .digest("hex");
+
+  const normalizedSignature = String(signature).trim();
+
+  if (digest.length !== normalizedSignature.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(normalizedSignature));
+};
+
 export const initializeCheckoutForUser = async ({ user, payload }) => {
   const orderItems = await buildOrderItems(payload.items);
   const subtotal = orderItems.reduce((sum, item) => sum + item.total, 0);
@@ -560,6 +744,7 @@ export const initializeCheckoutForUser = async ({ user, payload }) => {
   });
   const discount = couponResult.discount;
   const total = subtotal + shippingFee - discount;
+  const paymentProvider = payload.paymentProvider || DEFAULT_PAYMENT_METHOD;
 
   const order = await OrderModel.create({
     userId: user.id,
@@ -572,8 +757,8 @@ export const initializeCheckoutForUser = async ({ user, payload }) => {
     total,
     currency: DEFAULT_CURRENCY,
     paymentStatus: "pending",
-    paymentMethod: DEFAULT_PAYMENT_METHOD,
-    paymentReference: generatePaymentReference(),
+    paymentMethod: paymentProvider,
+    paymentReference: generatePaymentReference(paymentProvider),
     orderStatus: "pending",
     trackingCode: `TRK-${Date.now().toString().slice(-8)}`,
     shippingAddress: payload.shippingAddress,
@@ -605,21 +790,12 @@ export const initializeCheckoutForUser = async ({ user, payload }) => {
   }
 };
 
-export const verifyCheckoutForUser = async ({ userId, txRef }) => {
-  const order = await OrderModel.findOne({
-    paymentReference: txRef,
-    userId,
-  });
-
-  if (!order) {
-    throw new ApiError(404, "Order not found for this payment reference", "ORDER_NOT_FOUND");
-  }
-
+const verifyFlutterwaveCheckoutForOrder = async (order, txRef) => {
   const transaction = await verifyFlutterwaveTransactionByReference(txRef);
   const providerStatus = transaction?.status || "unknown";
 
   if (providerStatus === FLUTTERWAVE_SUCCESS) {
-    assertSuccessfulTransactionMatchesOrder(order, transaction);
+    assertSuccessfulTransactionMatchesOrder(order, normalizeFlutterwaveTransaction(transaction));
     const updated = await markOrderPaid(order, transaction);
 
     return {
@@ -646,10 +822,59 @@ export const verifyCheckoutForUser = async ({ userId, txRef }) => {
   };
 };
 
+const verifyPaystackCheckoutForOrder = async (order, reference) => {
+  const transaction = await verifyPaystackTransactionByReference(reference);
+  const providerStatus = transaction?.status || "unknown";
+
+  if (providerStatus === PAYSTACK_SUCCESS) {
+    assertSuccessfulTransactionMatchesOrder(order, normalizePaystackTransaction(transaction));
+    const updated = await markOrderPaid(order, transaction);
+
+    return {
+      order: serializeOrder(updated),
+      paymentState: "paid",
+      providerStatus,
+    };
+  }
+
+  if (PAYSTACK_FAILURE_STATES.has(providerStatus)) {
+    const updated = await markOrderFailed(order, transaction);
+
+    return {
+      order: serializeOrder(updated),
+      paymentState: "failed",
+      providerStatus,
+    };
+  }
+
+  return {
+    order: serializeOrder(order),
+    paymentState: "pending",
+    providerStatus,
+  };
+};
+
+export const verifyCheckoutForUser = async ({ userId, txRef }) => {
+  const order = await OrderModel.findOne({
+    paymentReference: txRef,
+    userId,
+  });
+
+  if (!order) {
+    throw new ApiError(404, "Order not found for this payment reference", "ORDER_NOT_FOUND");
+  }
+
+  if (order.paymentMethod === "paystack") {
+    return verifyPaystackCheckoutForOrder(order, txRef);
+  }
+
+  return verifyFlutterwaveCheckoutForOrder(order, txRef);
+};
+
 export const handleFlutterwaveWebhook = async ({ signature, rawBody, payload }) => {
   resolveFlutterwaveSecretKey();
 
-  if (!isValidWebhookSignature({ signature, rawBody, payload })) {
+  if (!isValidFlutterwaveWebhookSignature({ signature, rawBody, payload })) {
     throw new ApiError(401, "Invalid Flutterwave signature", "INVALID_WEBHOOK_SIGNATURE");
   }
 
@@ -678,7 +903,7 @@ export const handleFlutterwaveWebhook = async ({ signature, rawBody, payload }) 
   }
 
   const providerStatus = transaction?.status || "unknown";
-  const paymentState = toPaymentState(providerStatus);
+  const paymentState = toFlutterwavePaymentState(providerStatus);
 
   if (eventName === "refund.processed") {
     await markOrderRefunded(order, transaction);
@@ -686,7 +911,7 @@ export const handleFlutterwaveWebhook = async ({ signature, rawBody, payload }) 
   }
 
   if (paymentState === "paid") {
-    assertSuccessfulTransactionMatchesOrder(order, transaction);
+    assertSuccessfulTransactionMatchesOrder(order, normalizeFlutterwaveTransaction(transaction));
     await markOrderPaid(order, transaction);
     return { received: true, handled: eventName || "payment.updated", paymentState: "paid" };
   }
@@ -694,6 +919,51 @@ export const handleFlutterwaveWebhook = async ({ signature, rawBody, payload }) 
   if (paymentState === "failed") {
     await markOrderFailed(order, transaction);
     return { received: true, handled: eventName || "payment.updated", paymentState: "failed" };
+  }
+
+  return { received: true, ignored: true, paymentState: "pending", providerStatus };
+};
+
+export const handlePaystackWebhook = async ({ signature, rawBody, payload }) => {
+  resolvePaystackSecretKey();
+
+  if (!isValidPaystackWebhookSignature({ signature, rawBody })) {
+    throw new ApiError(401, "Invalid Paystack signature", "INVALID_WEBHOOK_SIGNATURE");
+  }
+
+  const eventName = payload?.event || "";
+  const reference = payload?.data?.reference;
+
+  if (!reference) {
+    return { received: true, ignored: true, reason: "missing-transaction-identifiers" };
+  }
+
+  const transaction = await verifyPaystackTransactionByReference(reference);
+  const resolvedReference = transaction?.reference || reference;
+
+  const order = await OrderModel.findOne({ paymentReference: resolvedReference });
+
+  if (!order) {
+    return { received: true, ignored: true, reason: "order-not-found" };
+  }
+
+  const providerStatus = transaction?.status || "unknown";
+  const paymentState = toPaystackPaymentState(providerStatus);
+
+  if (eventName === "refund.processed") {
+    await markOrderRefunded(order, transaction);
+    return { received: true, handled: "refund.processed", paymentState: "refunded" };
+  }
+
+  if (paymentState === "paid") {
+    assertSuccessfulTransactionMatchesOrder(order, normalizePaystackTransaction(transaction));
+    await markOrderPaid(order, transaction);
+    return { received: true, handled: eventName || "charge.success", paymentState: "paid" };
+  }
+
+  if (paymentState === "failed") {
+    await markOrderFailed(order, transaction);
+    return { received: true, handled: eventName || "charge.failed", paymentState: "failed" };
   }
 
   return { received: true, ignored: true, paymentState: "pending", providerStatus };

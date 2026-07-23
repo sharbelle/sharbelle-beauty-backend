@@ -49,4 +49,5 @@ export const TRACKING_PROGRESS_FLOW = [
 
 export const DEFAULT_DISCOUNT = 0;
 export const DEFAULT_CURRENCY = "NGN";
+export const PAYMENT_PROVIDERS = ["flutterwave", "paystack"];
 export const DEFAULT_PAYMENT_METHOD = "flutterwave";

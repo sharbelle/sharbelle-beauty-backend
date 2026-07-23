@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PAYMENT_PROVIDERS } from "../config/constants.js";
 import { addressValidationSchema } from "./order.model.js";
 
 export const checkoutItemInputSchema = z.object({
@@ -12,6 +13,7 @@ export const initializeCheckoutInputSchema = z.object({
   shippingAddress: addressValidationSchema,
   billingAddress: addressValidationSchema.optional(),
   sameAsShipping: z.boolean().optional(),
+  paymentProvider: z.enum(PAYMENT_PROVIDERS).optional(),
 });
 
 export const verifyCheckoutParamSchema = z.object({

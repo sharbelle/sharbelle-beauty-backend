@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   checkoutDefaults,
   initializeCheckout,
+  paystackWebhook,
   verifyCheckout,
   webhook,
 } from "../controllers/checkout.controller.js";
@@ -15,6 +16,7 @@ import {
 const router = Router();
 
 router.post("/webhook", webhook);
+router.post("/paystack/webhook", paystackWebhook);
 router.get("/defaults", authMiddleware, checkoutDefaults);
 router.post("/initialize", authMiddleware, validateBody(initializeCheckoutInputSchema), initializeCheckout);
 router.get("/verify/:txRef", authMiddleware, validateParams(verifyCheckoutParamSchema), verifyCheckout);

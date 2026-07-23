@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { z } from "zod";
-import { ORDER_STATUSES, PAYMENT_STATUSES } from "../config/constants.js";
+import { ORDER_STATUSES, PAYMENT_PROVIDERS, PAYMENT_STATUSES } from "../config/constants.js";
 import {
   dateFilterQuerySchema,
   paginationQuerySchema,
@@ -265,6 +265,7 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: {
       type: String,
       required: true,
+      enum: PAYMENT_PROVIDERS,
       default: "flutterwave",
       trim: true,
     },

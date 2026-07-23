@@ -3,6 +3,7 @@ import sendResponse from "../helpers/sendResponse.js";
 import {
   getCheckoutDefaultsForUser,
   handleFlutterwaveWebhook,
+  handlePaystackWebhook,
   initializeCheckoutForUser,
   verifyCheckoutForUser,
 } from "../services/checkout.service.js";
@@ -44,6 +45,19 @@ export const checkoutDefaults = asyncHandler(async (req, res) => {
 export const webhook = asyncHandler(async (req, res) => {
   const result = await handleFlutterwaveWebhook({
     signature: req.get("flutterwave-signature") || req.get("verif-hash"),
+    rawBody: req.rawBody,
+    payload: req.body,
+  });
+
+  return sendResponse(res, {
+    message: "Webhook processed",
+    data: result,
+  });
+});
+
+export const paystackWebhook = asyncHandler(async (req, res) => {
+  const result = await handlePaystackWebhook({
+    signature: req.get("x-paystack-signature"),
     rawBody: req.rawBody,
     payload: req.body,
   });
